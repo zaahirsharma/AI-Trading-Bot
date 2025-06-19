@@ -7,8 +7,9 @@ import time
 import threading
 import random
 import alpaca_trade_api as tradeapi
+import openai
 
-import dotenv
+from dotenv import load_dotenv
 import os
 
 load_dotenv()
@@ -55,7 +56,7 @@ class TradingBotGUI:
         self.drawdown_entry.grid(row=0,column=5)
         
         # Creating add button, form_frame is root for widget
-        self.add_button = tk.Button(self.form_frame, text="Add Equity", command=self.add_equities)
+        self.add_button = tk.Button(self.form_frame, text="Add Equity", command=self.add_equity)
         self.add_button.grid(row=0,column=6)
         
         # Creating table to track traded equities
@@ -106,7 +107,7 @@ class TradingBotGUI:
         
         
     # Adding equities functions
-    def add_equities(self):
+    def add_equity(self):
         # Getting the symbol, levels, and drawdown from the entry fields
         symbol = self.symbol_entry.get().upper()
         levels = self.levels_entry.get()
@@ -128,6 +129,7 @@ class TradingBotGUI:
             "position": 0,
             "entry_price": entry_price,
             "levels": level_prices,
+            "drawdown": drawdown,
             "status": "Off"
         }
         # Save data and update table when adding equity
@@ -208,8 +210,91 @@ class TradingBotGUI:
         # Need to place an order
         return False 
         
-    
+    # Helper function to get max entry price
+    def get_max_entry_price(self, symbol):
+        try:
+            orders = api.list_orders(status='filled', limit=50)
+            # Assuming have average filled price, iterate through and find highest (entered position) and trade 
+            prices = [float(order.filled_avg_price) for order in orders if order.filled_avg_price and order.symbol == symbol]
+            return max(prices) if prices else -1
+        except Exception as e:
+            print("API Error", f"Error Fetching Orders: {e}")
+            return 0
         
+    
+    
+    def trade_systems(self):
+        # Iterate through the rows in the table
+        for symbol, data in self.equities.items():
+            # Check if the system is running
+            if data['status'] == 'On':
+                position_exists = False
+                # Get the current price of the symbol
+                try:
+                    position = api.get_position(symbol)
+                    entry_price = self.get_max_entry_price(symbol)
+                    position_exists = True
+                # If no position exists, we need to place an order
+                except Exception as e:
+                    api.submit_order(
+                        symbol=symbol,
+                        qty=1,
+                        side='buy',
+                        type='market',
+                        time_in_force='gtc',
+                    )
+                    messagebox.showinfo("Order Placed", f"Initial Order Placed for {symbol}")
+                    time.sleep(2)
+                    entry_price = self.get_max_entry_price(symbol)
+                print(entry_price)
+                
+                # Check if the order already exists
+                level_prices = {i+1:round(entry_price * (1 - data["drawdown"] * (i+1)), 2) for i in range(len(data["levels"]))}
+                existing_levels = self.equities.get(symbol, {}).get("levels", {})
+                # Iterate through level prices
+                for level, price in level_prices.items():
+                    if level not in existing_levels and -level not in existing_levels:
+                        existing_levels[level] = price
+                
+                # Updating data
+                self.equities[symbol]["entry_price"] = entry_price
+                self.equities[symbol]["levels"] = existing_levels
+                # Flag to indicate active position
+                self.equities[symbol]["position"] = 1
+                
+                # Now placing order
+                for level, prices in level_prices.items():
+                    if level in self.equities[symbol]['levels']:
+                        self.place_order(symbol, prices, level)
+                
+            self.save_equities()
+            self.refresh_table()
+        else:
+            return
+        
+    # Function to place order
+    def place_order(self, symbol, price, level):
+        # Check active order for this level
+        if -level in self.equities[symbol]['levels'] or '-1' in self.equities[symbol]['levels'].keys():
+            return
+            
+        try:
+            api.submit_order(
+                symbol=symbol,
+                qty=1,
+                side='buy',
+                type='limit',
+                time_in_force='gtc',
+                limit_price=price
+            )
+            # Mark level in data, -level to indicate active position
+            self.equities[symbol]['levels'][-level] = price
+            # Delete original positive level
+            del self.equities[symbol]['levels'][level]
+            print(f"Placed order for {symbol} at {price}")
+        except Exception as e:
+            messagebox.showerror("Order Error", f"Error placing order for {symbol}: {e}")
+    
     
     # Updating table function
     def refresh_table(self):
