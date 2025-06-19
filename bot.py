@@ -6,6 +6,13 @@ import time
 # Important for updating user interface
 import threading
 import random
+import alpaca_trade_api as tradeapi
+
+import dotenv
+import os
+
+load_dotenv()
+api = tradeapi.REST(os.getenv('ALPACA_KEY'), os.getenv('ALPACA_SECRET_KEY'), os.getenv('BASE_URL'), api_version='v2')
 
 # Store trading symbols and levels of trading (active positions and entry and exit prices)
 DATA_FILE = "equities.json"
@@ -177,6 +184,31 @@ class TradingBotGUI:
         self.chat_output.config(state=tk.DISABLED)
         # Delete input field
         self.chat_input.delete(0, tk.END)
+        
+       
+    # Get current pricing to execute trades
+    def fetch_alpaca_data(self, symbol):
+        try:
+            barset = api.get_latest_trade(symbol)
+            return {"price": barset.price}
+        except Exception as e:
+            return {"price": -1} 
+        
+    # Check if any existing orders
+    def check_existing_orders(self, symbol, price):
+        try: 
+            orders = api.list_orders(status='open', symbols = symbol)
+            for order in orders:
+                # If order already exists for this level
+                if float(order.limit_price) == price:
+                    return True
+        except Exception as e:
+            print("API Error", f"Error checking existing orders: {e}")
+        
+        # Need to place an order
+        return False 
+        
+    
         
     
     # Updating table function
