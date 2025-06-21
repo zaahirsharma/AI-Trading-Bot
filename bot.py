@@ -23,9 +23,63 @@ def fetch_mock_api(symbol):
         "price":100
     }
     
+def fetch_portfolio():
+    positions = api.list_positions()
+    portfolio = []
+    for position in positions:
+        portfolio.append({
+            "symbol": position.symbol,
+            "qty": position.qty,
+            "entry_price": position.avg_entry_price,
+            "current_price": position.current_price,
+            "unrealized_pl": position.unrealized_pl,
+            "side":"buy"
+        })
+    return portfolio
 
-def mock_chatgpt_reponse(message):
-    return f"Mock reponse to: {message}"
+def fetch_open_orders():
+    orders = api.list_orders(status='open')
+    open_orders = []
+    for order in orders:
+        open_orders.append({
+            "symbol": order.symbol,
+            "qty": order.qty,
+            "limit_price": order.limit_price,
+            "side": "buy"
+        })
+    return open_orders
+
+def chatgpt_response(message):
+    # Get current info for account, LLM will become portfolio manager
+    portfolio_data = fetch_portfolio()
+    open_orders = fetch_open_orders()
+    
+    # Has all info from account with blanket instructions
+    pre_prompt = f"""
+    You are an AI portfolio manager responsible for analyzing my portfolio.
+    You're tasks are the following:
+    1.) Evaluate risk exposures of my current holdings
+    2.) Analyze my open limit orders and their potential impact
+    3.) Provide insights into portfolio health, diversification, trade adj. etc.
+    4.) Speculate on the market outlook based on current market conditions
+    5.) Identify potential market risks and suggest risk management strategies
+
+    Here is my portfolio: {portfolio_data}
+
+    Here are my open orders {open_orders}
+
+    Overall, answer the following question with priority having that background: {message}
+    """
+    
+    response = opeani.ChatCompletion.create(
+        model = "gpt-4",
+        messages = [{"role": "system", "content": pre_prompt}],
+        api_key=os.getenv('OPENAI_API_KEY')
+    )
+    
+    return reponse['choices'][0]['message']['content']
+    
+
 
 # Creating trading bot class
 class TradingBotGUI:
@@ -177,7 +231,7 @@ class TradingBotGUI:
             return
         
         # Message input
-        response = mock_chatgpt_reponse(message)
+        response = chatgpt_reponse(message)
         
         # Display message in chat output
         self.chat_output.config(state=tk.NORMAL)
